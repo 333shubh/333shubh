@@ -2,9 +2,9 @@
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="assets/header-dark.svg"><img src="assets/header-light.svg" width="100%" alt="shubh. Developer and designer turning interesting ideas into things you can actually use."></picture>
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="assets/stack-dark.svg"><img src="assets/stack-light.svg" width="100%" alt="Stack: TypeScript 59%, Python 35%, JavaScript 2%, HTML 2%, Other 2%, Next.js, React, Three.js, Tailwind, FastAPI, Flask, Supabase, SQLAlchemy, MapLibre, Vitest, Pytest"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="assets/stack-dark.svg"><img src="assets/stack-light.svg" width="100%" alt="Stack: TypeScript 57%, Python 34%, CSS 5%, HTML 2%, Other 2%, React, Tailwind, Supabase, Next.js, Three.js, Flask, Vitest, FastAPI, Express, Vite, Pandas, NumPy"></picture>
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="assets/summary-dark.svg"><img src="assets/summary-light.svg" width="100%" alt="340 contributions this year, 7 day longest streak, 4 public repositories"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="assets/summary-dark.svg"><img src="assets/summary-light.svg" width="100%" alt="204 contributions this year, 12 day longest streak, 4 public repositories, 2 collaborations"></picture>
 
 <p align="center">
 <a href="https://www.linkedin.com/in/shubhjadiya/"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/link-linkedin-dark.svg"><img src="assets/link-linkedin-light.svg" width="112" alt="LinkedIn"></picture></a>
