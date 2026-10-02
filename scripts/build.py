@@ -68,8 +68,7 @@ query($login: String!) {
     name login bio websiteUrl
     socialAccounts(first: 6) { nodes { provider url } }
     contributionsCollection { contributionCalendar { totalContributions
-      weeks { contributionDays { contributionCount date weekday } } } }
-    pinnedItems(first: 6, types: REPOSITORY) { nodes { ... on Repository { ...R } } }
+      weeks { contributionDays { contributionCount } } } }
     repositories(first: 100, ownerAffiliations: OWNER, privacy: PUBLIC, isFork: false,
                  orderBy: {field: PUSHED_AT, direction: DESC}) { totalCount nodes { ...R } }
     repositoriesContributedTo(first: 10, privacy: PUBLIC, contributionTypes: [COMMIT, PULL_REQUEST],
@@ -77,17 +76,14 @@ query($login: String!) {
   }
 }
 fragment R on Repository {
-  name nameWithOwner url description stargazerCount pushedAt isArchived isFork
+  name isArchived isFork
   owner { login }
-  primaryLanguage { name color }
-  defaultBranchRef { target { ... on Commit { history { totalCount } } } }
-  languages(first: 8, orderBy: {field: SIZE, direction: DESC}) { edges { size node { name color } } }
+  languages(first: 8, orderBy: {field: SIZE, direction: DESC}) { edges { size node { name } } }
   pkg: object(expression: "HEAD:package.json") { ... on Blob { text } }
   pkgFrontend: object(expression: "HEAD:frontend/package.json") { ... on Blob { text } }
   req: object(expression: "HEAD:requirements.txt") { ... on Blob { text } }
   reqBackend: object(expression: "HEAD:backend/requirements.txt") { ... on Blob { text } }
   pyproject: object(expression: "HEAD:pyproject.toml") { ... on Blob { text } }
-  readme: object(expression: "HEAD:README.md") { ... on Blob { text } }
 }
 """
 
@@ -137,58 +133,19 @@ def techs(repo):
     return [t[0] for t in TECH if t[1] & deps]
 
 
-def strip_markdown(s):
-    s = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", s)
-    s = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", s)
-    s = re.sub(r"<[^>]+>", "", s)
-    return re.sub(r"\s+", " ", re.sub(r"[*_`]", "", s)).strip()
-
-
-def describe(repo, limit):
-    """The repo description, else the opening sentences of its README."""
-    text = CONFIG.get("descriptions", {}).get(repo["name"]) or repo.get("description")
-    if not text:
-        for para in re.split(r"\n\s*\n", blob(repo, "readme")):
-            para = strip_markdown(para)
-            if para and not para.startswith(("#", "|", "-", ">", "```")):
-                text = para
-                break
-    text = strip_markdown(text or "")
-    if len(text) <= limit:
-        return text
-    out = ""
-    for sentence in re.split(r"(?<=[.!?])\s+", text):
-        if len(out) + len(sentence) + 1 > limit:
-            break
-        out = f"{out} {sentence}".strip()
-    return out or text[: limit - 1].rstrip() + "…"
-
-
 def summarise(user):
     hidden = set(CONFIG.get("hide", [])) | {user["login"]}
     own = [r for r in user["repositories"]["nodes"]
            if r["name"] not in hidden and not r["isArchived"] and not r["isFork"]]
     contributed = [r for r in (user.get("repositoriesContributedTo") or {}).get("nodes", [])
-                   if r and r["owner"]["login"] != user["login"] and r["name"] not in hidden]
-
-    worlds, seen = [], set()
-    pinned = [r for r in (user.get("pinnedItems") or {}).get("nodes", []) if r and r["name"] not in hidden]
-    for r in pinned + own + contributed[:2]:
-        if r["nameWithOwner"] not in seen and len(worlds) < CONFIG.get("max_worlds", 6):
-            seen.add(r["nameWithOwner"])
-            worlds.append(r)
+                   if r and r["owner"]["login"] != user["login"]]
 
     # Languages by bytes across owned repos, then frameworks by how many repos use them.
     langs = {}
     for r in own:
-        total = sum(e["size"] for e in r["languages"]["edges"]) or 1
         for e in r["languages"]["edges"]:
-            item = langs.setdefault(e["node"]["name"], {"size": 0, "repos": 0, "color": e["node"]["color"] or "#8b8b8b"})
-            item["size"] += e["size"]
-            item["repos"] += e["size"] / total >= 0.05
-    all_bytes = sum(v["size"] for v in langs.values()) or 1
-    languages = [LANG_LABEL.get(k, k) for k, v in sorted(langs.items(), key=lambda kv: -kv[1]["size"])
-                 if v["size"] / all_bytes >= 0.02 and v["repos"]][:6]
+            langs[e["node"]["name"]] = langs.get(e["node"]["name"], 0) + e["size"]
+    all_bytes = sum(langs.values()) or 1
 
     counts = {}
     for r in own + contributed:
@@ -196,8 +153,8 @@ def summarise(user):
             counts[t] = counts.get(t, 0) + 1
     frameworks = sorted((t[0] for t in TECH if t[0] in counts), key=lambda t: -counts[t])
     share, other = [], 100
-    for name, v in sorted(langs.items(), key=lambda kv: -kv[1]["size"])[:4]:
-        pct = round(100 * v["size"] / all_bytes)
+    for name, size in sorted(langs.items(), key=lambda kv: -kv[1])[:4]:
+        pct = round(100 * size / all_bytes)
         if pct >= 2:
             share.append((LANG_LABEL.get(name, name), pct))
             other -= pct
@@ -205,11 +162,9 @@ def summarise(user):
         share.append(("Other", other))
 
     calendar = user["contributionsCollection"]["contributionCalendar"]
-    weeks = [[{"count": day["contributionCount"], "date": day["date"], "weekday": day["weekday"]}
-              for day in week["contributionDays"]] for week in calendar.get("weeks", [])]
     streak = run = 0
-    for day in (day for week in weeks for day in week):
-        run = run + 1 if day["count"] else 0
+    for day in (day for week in calendar.get("weeks", []) for day in week["contributionDays"]):
+        run = run + 1 if day["contributionCount"] else 0
         streak = max(streak, run)
 
     links = [(PROVIDERS.get(a["provider"], re.sub(r"^https?://(www\.)?|/.*$", "", a["url"])), a["url"])
@@ -223,19 +178,14 @@ def summarise(user):
         "login": user["login"],
         "name": user.get("name") or user["login"],
         "bio": user.get("bio") or "",
-        "worlds": worlds,
         "language_share": share,
         "frameworks": frameworks[:12],
-        "weeks": weeks,
-        "active_days": sum(1 for week in weeks for day in week if day["count"]),
         "streak": streak,
-        "latest": own[0]["name"].strip("-_") if own else "",
+        "collaborations": len(contributed),
         "links": links,
         "contributions": calendar["totalContributions"],
         # the profile repo itself is not a project
         "repo_count": user["repositories"]["totalCount"] - any(r["name"] == user["login"] for r in user["repositories"]["nodes"]),
-        "stars": sum(r["stargazerCount"] for r in own),
-        "top_language": languages[0] if languages else "",
     }
 
 
@@ -329,47 +279,16 @@ def header(d, theme):
     c.add(f'<circle cx="{ox}" cy="{oy}" r="2" fill="{t["ink"]}"/></g>')
 
     x = 56
-    notes = [n for n in (CONFIG.get("status"), d["latest"] and f'Now building {d["latest"]}') if n]
-    if notes:
+    status = CONFIG.get("status")
+    if status:
         c.add(f'<circle cx="{x + 4}" cy="60" r="4" fill="{t["ink"]}"/>')
-        c.text(x + 18, 65, 12, "   /   ".join(notes).upper(), t["muted"], spacing=110)
+        c.text(x + 18, 65, 12, status.upper(), t["muted"], spacing=110)
     size = 104
     while text_w(d["name"], size, "serif") > 420 and size > 44:
         size -= 4
     c.text(x - 4, 168, size, d["name"], t["ink"], face="serif")
     for i, line in enumerate(wrap(d["bio"].split(), 18, 420)[:3]):
         c.text(x, 214 + i * 27, 18, " ".join(line), t["muted"])
-    return c.render()
-
-
-def activity(d, theme):
-    figures = [(f'{d["contributions"]:,}', "contributions this year"), (str(d["active_days"]), "active days"),
-               (str(d["streak"]), "day longest streak"), (str(d["repo_count"]), "public repositories")]
-    c = Canvas(310, "Activity. " + ", ".join(f"{n} {what}" for n, what in figures), theme)
-    t = c.t
-    c.label(0, 30, "Activity")
-    for i, (number, what) in enumerate(figures):
-        c.text(i * 216 - 2, 96, 52, number, t["ink"], face="serif")
-        c.text(i * 216, 120, 12.5, what, t["muted"])
-
-    # the year as a halftone: one dot per day, sized by that day's contributions
-    weeks = d["weeks"][-53:]
-    peak = max([day["count"] for week in weeks for day in week] + [1])
-    pitch, top = 16, 162
-    left = (W - pitch * len(weeks)) / 2 + pitch / 2
-    month = None
-    for col, week in enumerate(weeks):
-        for day in week:
-            cx, cy = left + col * pitch, top + day["weekday"] * pitch
-            if day["count"]:
-                c.add(f'<circle cx="{cx:.1f}" cy="{cy}" r="{2 + 4.6 * (day["count"] / peak) ** .5:.2f}" fill="{t["ink"]}"/>')
-            else:
-                c.add(f'<circle cx="{cx:.1f}" cy="{cy}" r="1.1" fill="{t["faint"]}"/>')
-        first = datetime.date.fromisoformat(week[0]["date"])
-        if first.month != month and col < len(weeks) - 2:
-            if month is not None or first.day <= 7:
-                c.text(left + col * pitch - 4, top + 7 * pitch + 14, 11, f"{first:%b}", t["muted"])
-            month = first.month
     return c.render()
 
 
@@ -405,43 +324,6 @@ def stack(d, theme):
     return c.render()
 
 
-def heading(title, theme):
-    c = Canvas(52, title, theme)
-    c.label(0, 30, title)
-    return c.render()
-
-
-def project(repo, index, d, theme):
-    own = repo["owner"]["login"] == d["login"]
-    name = repo["name"].strip("-_")
-    desc = wrap(describe(repo, 170).split(), 15.5, 600)[:2]
-    tags = [repo["primaryLanguage"]["name"]] * bool(repo.get("primaryLanguage")) + techs(repo)[:4]
-    tag_y = 76 + 23 * len(desc) + 4
-    c = Canvas(tag_y + 28, f"{name}: {describe(repo, 170)}", theme)
-    t = c.t
-    c.line(0)
-    c.text(0, 44, 12, f"{index:02d}", t["muted"], spacing=80)
-    x = 44 + c.text(44, 46, 31, name, t["ink"], face="serif")
-    if not own:
-        c.text(x + 12, 46, 19, f'with {repo["owner"]["login"]}', t["muted"], face="italic")
-    for i, line in enumerate(desc):
-        c.text(44, 76 + i * 23, 15.5, " ".join(line), t["muted"])
-    c.text(44, tag_y, 13, "  ·  ".join(tags), t["ink"])
-
-    pushed = datetime.datetime.fromisoformat(repo["pushedAt"].replace("Z", "+00:00"))
-    facts = [f"{pushed:%b %Y}"]
-    commits = (((repo.get("defaultBranchRef") or {}).get("target") or {}).get("history") or {}).get("totalCount")
-    if commits and own:  # on someone else's repo the total is not this user's work
-        facts.append(f"{commits:,} commit{'s' * (commits != 1)}")
-    if repo["stargazerCount"]:
-        facts.append(f'{repo["stargazerCount"]:,} star{"s" * (repo["stargazerCount"] != 1)}')
-    x = W - c.text(W, 44, 15, "↗", t["muted"], anchor="end") - 10
-    c.text(x, 44, 13, facts[0], t["muted"], anchor="end")
-    for i, fact in enumerate(facts[1:]):
-        c.text(W, 76 + i * 23, 13, fact, t["muted"], anchor="end")
-    return c.render()
-
-
 def link_w(text):
     return round(text_w(text, 24, "italic") + 34)
 
@@ -453,10 +335,21 @@ def link(text, theme):
     return c.render()
 
 
-def rule(theme):
-    c = Canvas(1, "", theme)
-    c.line(0)
+def summary(d, theme):
+    c = Canvas(142, "Summary. " + ", ".join(f"{n} {what}" for n, what in figures(d)), theme)
+    c.label(0, 30, "Summary")
+    for i, (number, what) in enumerate(figures(d)):
+        c.text(i * 216 - 2, 96, 52, number, c.t["ink"], face="serif")
+        c.text(i * 216, 120, 12.5, what, c.t["muted"])
     return c.render()
+
+
+def figures(d):
+    out = [(f'{d["contributions"]:,}', "contributions this year"), (str(d["streak"]), "day longest streak"),
+           (str(d["repo_count"]), "public repositories")]
+    if d["collaborations"]:
+        out.append((str(d["collaborations"]), "collaborations"))
+    return out
 
 
 # ---------------------------------------------------------------- output
@@ -478,22 +371,12 @@ def build(user):
                 f'<img src="assets/{name}-light.svg" width="{width}" alt="{html.escape(alt, quote=True)}"></picture>')
 
     out = ["<!-- Generated by scripts/build.py. Change config.json or the script, not this file. -->", "",
-           picture("header", lambda th: header(d, th), f'{d["name"]}. {d["bio"]}'), "",
-           picture("activity", lambda th: activity(d, th),
-                   f'{d["contributions"]} contributions in the last year across {d["active_days"]} active days, '
-                   f'longest streak {d["streak"]} days, {d["repo_count"]} public repositories'), ""]
+           picture("header", lambda th: header(d, th), f'{d["name"]}. {d["bio"]}'), ""]
+
     if d["language_share"] or d["frameworks"]:
         alt = ", ".join([f"{n} {p}%" for n, p in d["language_share"]] + d["frameworks"])
         out += [picture("stack", lambda th: stack(d, th), "Stack: " + alt), ""]
-    if d["worlds"]:
-        out.append(picture("work", lambda th: heading("Selected work", th), "Selected work"))
-        for i, repo in enumerate(d["worlds"], 1):
-            own = repo["owner"]["login"] == d["login"]
-            name = f'project-{slug(repo["name"] if own else repo["nameWithOwner"])}'
-            alt = f'{repo["name"].strip("-_")}: {describe(repo, 170)}'
-            out.append(f'<a href="{html.escape(repo["url"], quote=True)}">'
-                       f'{picture(name, lambda th: project(repo, i, d, th), alt)}</a>')
-        out += [picture("rule", rule, ""), ""]
+    out += [picture("summary", lambda th: summary(d, th), ", ".join(f"{n} {what}" for n, what in figures(d))), ""]
     if d["links"]:
         out.append('<p align="center">')
         for text, url in d["links"]:
@@ -501,7 +384,7 @@ def build(user):
                        f'{picture("link-" + slug(text), lambda th: link(text, th), text, link_w(text))}</a>')
         out += ["</p>", ""]
     (ROOT / "README.md").write_text("\n".join(out), encoding="utf-8", newline="\n")
-    print(f'Built README for {d["login"]}: {len(d["worlds"])} projects, {d["contributions"]} contributions, '
+    print(f'Built README for {d["login"]}: {d["contributions"]} contributions, '
           f'languages {d["language_share"]}, frameworks {d["frameworks"]}')
 
 
