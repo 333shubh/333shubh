@@ -431,7 +431,7 @@ def project(repo, index, d, theme):
     pushed = datetime.datetime.fromisoformat(repo["pushedAt"].replace("Z", "+00:00"))
     facts = [f"{pushed:%b %Y}"]
     commits = (((repo.get("defaultBranchRef") or {}).get("target") or {}).get("history") or {}).get("totalCount")
-    if commits:
+    if commits and own:  # on someone else's repo the total is not this user's work
         facts.append(f"{commits:,} commit{'s' * (commits != 1)}")
     if repo["stargazerCount"]:
         facts.append(f'{repo["stargazerCount"]:,} star{"s" * (repo["stargazerCount"] != 1)}')
