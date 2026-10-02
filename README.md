@@ -14,7 +14,7 @@
 <a href="https://github.com/snehaa006/prakriva-updated"><img src="assets/world-snehaa006-prakriva-updated.svg" width="100%" alt="prakriva-updated: An Ayurvedic diet/wellness planning app connecting doctors and patients."></a>
 </p>
 
-<p align="center"><img src="assets/statistics.svg" width="100%" alt="198 contributions in the last 12 months, 5 public repositories"></p>
+<p align="center"><img src="assets/statistics.svg" width="100%" alt="199 contributions in the last 12 months, 4 public repositories"></p>
 
 <p align="center">
 <a href="https://www.linkedin.com/in/shubhjadiya/"><img src="assets/button-linkedin.svg" width="272" alt="LinkedIn"></a>
