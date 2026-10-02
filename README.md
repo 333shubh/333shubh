@@ -2,17 +2,19 @@
 
 <p align="center"><img src="assets/banner.svg" width="100%" alt="shubh. Developer and designer turning interesting ideas into things you can actually use."></p>
 
-<p align="center"><img src="assets/inventory.svg" width="100%" alt="Tech stack: TypeScript, Python, Next.js, React, Three.js, Tailwind, FastAPI, Flask, Supabase, SQLAlchemy, MapLibre, Vitest"></p>
+<p align="center"><img src="assets/inventory.svg" width="100%" alt="Tech stack: TypeScript, Python, CSS, React, Tailwind, Supabase, Next.js, Three.js, Flask, Vitest, FastAPI, Express"></p>
 
 <p align="center">
 <img src="assets/worlds.svg" width="100%" alt="Projects">
-<a href="https://github.com/333shubh/VinyasGen"><img src="assets/world-vinyasgen.svg" width="100%" alt="VinyasGen: Generative Intelligence for Urban Regeneration."></a>
-<a href="https://github.com/333shubh/undercurrent"><img src="assets/world-undercurrent.svg" width="100%" alt="undercurrent: A headless daily research radar."></a>
-<a href="https://github.com/333shubh/folio-"><img src="assets/world-folio.svg" width="100%" alt="folio: Portfolio site. Next.js 16 (App Router) + three.js via react-three-fiber."></a>
 <a href="https://github.com/333shubh/veil"><img src="assets/world-veil.svg" width="100%" alt="veil: Private neighbourhood totals for smart meters."></a>
+<a href="https://github.com/333shubh/folio-"><img src="assets/world-folio.svg" width="100%" alt="folio: Portfolio site. Next.js 16 (App Router) + three.js via react-three-fiber."></a>
+<a href="https://github.com/333shubh/undercurrent"><img src="assets/world-undercurrent.svg" width="100%" alt="undercurrent: A headless daily research radar."></a>
+<a href="https://github.com/333shubh/VinyasGen"><img src="assets/world-vinyasgen.svg" width="100%" alt="VinyasGen: Generative Intelligence for Urban Regeneration."></a>
+<a href="https://github.com/ayushswamy30/MirrorSpace"><img src="assets/world-ayushswamy30-mirrorspace.svg" width="100%" alt="MirrorSpace: Mental Health App - Full stack React + Node.js project"></a>
+<a href="https://github.com/snehaa006/prakriva-updated"><img src="assets/world-snehaa006-prakriva-updated.svg" width="100%" alt="prakriva-updated: An Ayurvedic diet/wellness planning app connecting doctors and patients."></a>
 </p>
 
-<p align="center"><img src="assets/statistics.svg" width="100%" alt="196 contributions in the last 12 months, 4 public repositories"></p>
+<p align="center"><img src="assets/statistics.svg" width="100%" alt="198 contributions in the last 12 months, 5 public repositories"></p>
 
 <p align="center">
 <a href="https://www.linkedin.com/in/shubhjadiya/"><img src="assets/button-linkedin.svg" width="272" alt="LinkedIn"></a>
