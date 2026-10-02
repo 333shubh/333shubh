@@ -4,11 +4,5 @@
   "hide": [],
   "descriptions": {},
   "extra_links": [],
-  "splashes": [
-    "Open to work!",
-    "Design + code!",
-    "Ships real things!",
-    "Now with tests!",
-    "Built, not mocked up!"
-  ]
+  "status": "Open to work"
 }

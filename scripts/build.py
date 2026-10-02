@@ -4,18 +4,17 @@
     GITHUB_TOKEN=... python scripts/build.py          # live
     python scripts/build.py --data response.json      # from a saved API response
 
-Standard library only. Text is drawn as vector outlines of the Monocraft
-pixel font (scripts/glyphs.json), so the SVGs need no font at view time.
+Standard library only. Text is drawn as vector outlines of Instrument Serif
+and Inter (scripts/glyphs.json), so the SVGs need no font at view time. Every
+image is written in a light and a dark variant; the README picks one with
+<picture>, which follows the viewer's GitHub theme.
 """
 import datetime
-import hashlib
 import html
 import json
 import os
-import random
 import re
 import sys
-import textwrap
 import urllib.request
 from pathlib import Path
 
@@ -24,42 +23,40 @@ ASSETS = ROOT / "assets"
 GLYPHS = json.loads((ROOT / "scripts" / "glyphs.json").read_text(encoding="utf-8"))
 CONFIG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
 
-W = 864        # every image is this wide; 18 blocks of 48px
-BLOCK = 48     # one 16x16 texture at 3x
-PAD = 24
+W = 864
+THEMES = {
+    "light": {"ink": "#2b2a27", "muted": "#85827a", "line": "#e4e0d8", "base": "#f5f2ec",
+              "glow": ["#d9e6d6", "#f4e1d2", "#e2ddf1"]},
+    "dark": {"ink": "#e9e5dd", "muted": "#8f8c85", "line": "#2b2e33", "base": "#16191d",
+             "glow": ["#22362c", "#35283a", "#1f2c3d"]},
+}
 
 # Dependency name -> stack item, in display priority order.
 TECH = [
-    ("Next.js", "NX", "#2b2b2b", {"next"}),
-    ("React", "RE", "#61dafb", {"react"}),
-    ("React Native", "RN", "#4cc2e4", {"react-native"}),
-    ("Expo", "EX", "#4630eb", {"expo"}),
-    ("Three.js", "3JS", "#049ef4", {"three"}),
-    ("Tailwind", "TW", "#38bdf8", {"tailwindcss"}),
-    ("FastAPI", "FA", "#009688", {"fastapi"}),
-    ("Flask", "FL", "#3babc3", {"flask"}),
-    ("Django", "DJ", "#0c4b33", {"django"}),
-    ("Supabase", "SB", "#3ecf8e", {"@supabase/supabase-js", "supabase"}),
-    ("Express", "EXP", "#6b6b6b", {"express"}),
-    ("Vue", "VUE", "#41b883", {"vue"}),
-    ("Svelte", "SV", "#ff3e00", {"svelte"}),
-    ("Vite", "VI", "#9575ff", {"vite"}),
-    ("PyTorch", "PT", "#ee4c2c", {"torch"}),
-    ("TensorFlow", "TF", "#ff6f00", {"tensorflow"}),
-    ("Pandas", "PD", "#150458", {"pandas"}),
-    ("NumPy", "NP", "#4d77cf", {"numpy"}),
-    ("Prisma", "PR", "#2d3748", {"prisma", "@prisma/client"}),
-    ("SQLAlchemy", "SQL", "#d71f00", {"sqlalchemy"}),
-    ("MapLibre", "MAP", "#396cb2", {"maplibre-gl"}),
-    ("Vitest", "VT", "#6e9f18", {"vitest"}),
-    ("Pytest", "TST", "#0a9edc", {"pytest"}),
+    ("Next.js", {"next"}),
+    ("React", {"react"}),
+    ("React Native", {"react-native"}),
+    ("Expo", {"expo"}),
+    ("Three.js", {"three"}),
+    ("Tailwind", {"tailwindcss"}),
+    ("FastAPI", {"fastapi"}),
+    ("Flask", {"flask"}),
+    ("Django", {"django"}),
+    ("Supabase", {"@supabase/supabase-js", "supabase"}),
+    ("Express", {"express"}),
+    ("Vue", {"vue"}),
+    ("Svelte", {"svelte"}),
+    ("Vite", {"vite"}),
+    ("PyTorch", {"torch"}),
+    ("TensorFlow", {"tensorflow"}),
+    ("Pandas", {"pandas"}),
+    ("NumPy", {"numpy"}),
+    ("Prisma", {"prisma", "@prisma/client"}),
+    ("SQLAlchemy", {"sqlalchemy"}),
+    ("MapLibre", {"maplibre-gl"}),
+    ("Vitest", {"vitest"}),
+    ("Pytest", {"pytest"}),
 ]
-LANG_ABBR = {
-    "TypeScript": "TS", "JavaScript": "JS", "Python": "PY", "HTML": "HTM", "CSS": "CSS",
-    "Shell": "SH", "Go": "GO", "Rust": "RS", "Java": "JV", "Kotlin": "KT", "Swift": "SW",
-    "C++": "C++", "C": "C", "C#": "C#", "Dart": "DT", "Ruby": "RB", "PHP": "PHP",
-    "Jupyter Notebook": "NB", "SCSS": "SC", "PLpgSQL": "SQL", "GLSL": "GL",
-}
 LANG_LABEL = {"Jupyter Notebook": "Jupyter", "PLpgSQL": "Postgres SQL"}
 PROVIDERS = {"LINKEDIN": "LinkedIn", "TWITTER": "X / Twitter", "YOUTUBE": "YouTube",
              "INSTAGRAM": "Instagram", "MASTODON": "Mastodon", "BLUESKY": "Bluesky",
@@ -135,7 +132,7 @@ def dependencies(repo):
 
 def techs(repo):
     deps = dependencies(repo)
-    return [t for t in TECH if t[3] & deps]
+    return [t[0] for t in TECH if t[1] & deps]
 
 
 def strip_markdown(s):
@@ -179,7 +176,7 @@ def summarise(user):
             seen.add(r["nameWithOwner"])
             worlds.append(r)
 
-    # Languages by bytes across owned repos; the stack count is how many repos use each.
+    # Languages by bytes across owned repos, then frameworks by how many repos use them.
     langs = {}
     for r in own:
         total = sum(e["size"] for e in r["languages"]["edges"]) or 1
@@ -188,18 +185,15 @@ def summarise(user):
             item["size"] += e["size"]
             item["repos"] += e["size"] / total >= 0.05
     all_bytes = sum(v["size"] for v in langs.values()) or 1
-    languages = [(LANG_LABEL.get(k, k), LANG_ABBR.get(k, k[:2].upper()), v["color"], v["repos"])
-                 for k, v in sorted(langs.items(), key=lambda kv: -kv[1]["size"])
+    languages = [LANG_LABEL.get(k, k) for k, v in sorted(langs.items(), key=lambda kv: -kv[1]["size"])
                  if v["size"] / all_bytes >= 0.02 and v["repos"]][:6]
 
     counts = {}
     for r in own + contributed:
         for t in techs(r):
-            counts[t[0]] = counts.get(t[0], 0) + 1
-    frameworks = sorted((t for t in TECH if t[0] in counts), key=lambda t: -counts[t[0]])
-    stack = (languages + [(t[0], t[1], t[2], counts[t[0]]) for t in frameworks])[:12]
-    if len(stack) > 6:  # keep every inventory row full
-        stack = stack[: len(stack) // 6 * 6]
+            counts[t] = counts.get(t, 0) + 1
+    frameworks = sorted((t[0] for t in TECH if t[0] in counts), key=lambda t: -counts[t])
+    stack = (languages + frameworks)[:12]
 
     links = [(PROVIDERS.get(a["provider"], re.sub(r"^https?://(www\.)?|/.*$", "", a["url"])), a["url"])
              for a in (user.get("socialAccounts") or {}).get("nodes", [])]
@@ -219,323 +213,166 @@ def summarise(user):
         # the profile repo itself is not a project
         "repo_count": user["repositories"]["totalCount"] - any(r["name"] == user["login"] for r in user["repositories"]["nodes"]),
         "stars": sum(r["stargazerCount"] for r in own),
-        "top_language": languages[0][0] if languages else "",
+        "top_language": languages[0] if languages else "",
     }
 
 
 # ---------------------------------------------------------------- drawing
 
-def rgb(c):
-    c = c.lstrip("#")
-    return [int(c[i:i + 2], 16) for i in (0, 2, 4)]
-
-
-def mix(c, other, t):
-    return "#%02x%02x%02x" % tuple(round(a + (b - a) * t) for a, b in zip(rgb(c), rgb(other)))
-
-
-def lighter(c, t):
-    return mix(c, "#ffffff", t)
-
-
-def darker(c, t):
-    return mix(c, "#000000", t)
-
-
-def seeded(key):
-    return random.Random(int(hashlib.sha256(key.encode()).hexdigest()[:12], 16))
-
-
-def noise(key, palette, weights):
-    rng = seeded(key)
-    return [rng.choices(palette, weights, k=16) for _ in range(16)]
-
-
-def tex_dirt(key):
-    return noise(key, ["#866043", "#79553a", "#9b7653", "#593d29", "#6c4a32"], [5, 3, 2, 1, 2])
-
-
-def tex_grass(key):
-    grid, rng = tex_dirt(key), seeded(key + "g")
-    greens, weights = ["#5d9c3a", "#6aae42", "#4f8a30", "#79bd4f"], [4, 3, 2, 1]
-    for x in range(16):
-        for y in range(3 + rng.choice([0, 0, 1, 1, 2])):
-            grid[y][x] = rng.choices(greens, weights)[0]
-    return grid
-
-
-def tex_log(key):
-    rng = seeded(key)
-    cols = [rng.choice(["#6b5330", "#5a4526", "#7a6038", "#4c3a20"]) for _ in range(16)]
-    return [[c if rng.random() > .15 else "#5a4526" for c in cols] for _ in range(16)]
-
-
-def tex_block(key, color):
-    """A solid block tinted with `color`, bevelled like an item-form block."""
-    color = mix(color, "#808080", .12)
-    grid = noise(key, [color, lighter(color, .12), darker(color, .12), darker(color, .22)], [6, 2, 2, 1])
-    for i in range(16):
-        grid[0][i] = grid[i][0] = lighter(color, .38)
-    for i in range(16):
-        grid[15][i] = grid[i][15] = darker(color, .42)
-    return grid
-
-
 class Canvas:
-    def __init__(self, h, label):
-        self.h, self.label, self.defs, self.body = h, label, {}, []
+    def __init__(self, h, label, theme, w=W):
+        self.w, self.h, self.label, self.t = w, h, label, THEMES[theme]
+        self.defs, self.body = {}, []
 
     def add(self, s):
         self.body.append(s)
 
-    def rect(self, x, y, w, h, fill, extra=""):
-        self.add(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{fill}"{extra}/>')
+    def line(self, y):
+        self.add(f'<rect x="0" y="{y}" width="{self.w}" height="1" fill="{self.t["line"]}"/>')
 
-    def tex(self, tid, grid):
-        if tid in self.defs:
-            return tid
-        runs = {}
-        for y, row in enumerate(grid):
-            x = 0
-            while x < 16:
-                n = 1
-                while x + n < 16 and row[x + n] == row[x]:
-                    n += 1
-                runs.setdefault(row[x], []).append(f"M{x} {y}h{n}v1h-{n}z")
-                x += n
-        paths = "".join(f'<path fill="{c}" d="{"".join(d)}"/>' for c, d in runs.items())
-        self.defs[tid] = f'<g id="{tid}">{paths}</g>'
-        return tid
-
-    def put(self, tid, x, y, scale=3):
-        self.add(f'<use href="#{tid}" transform="translate({x} {y}) scale({scale})"/>')
-
-    def text(self, x, y, s, string, fill, shadow=True, anchor="start", outline=None):
-        """Draws `string` with its cap-top at y. One font pixel is `s` px; glyphs advance 6."""
-        width = text_w(string, s)
-        x = round(x - width / 2) if anchor == "middle" else x - width if anchor == "end" else x
-        uses = []
-        for i, ch in enumerate(string):
-            if ch == " ":
-                continue
-            ch = ch if ch in GLYPHS else "?"
-            gid = f"g{ord(ch):x}"
-            self.defs[gid] = f'<path id="{gid}" d="{GLYPHS[ch]}"/>'
-            uses.append(f'<use href="#{gid}" x="{i * 6}"/>')
-        uses = "".join(uses)
-        layers = []
-        if outline:
-            layers += [(outline, dx * s, dy * s) for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))]
-        elif shadow:
-            layers.append((darker(fill, .75), s, s))
-        for colour, dx, dy in layers + [(fill, 0, 0)]:
-            self.add(f'<g fill="{colour}" transform="translate({x + dx} {y + dy}) scale({s})">{uses}</g>')
-
-    def dirt_backdrop(self, dim=.72):
-        for name in ("dirt-a", "dirt-b"):
-            self.tex(name, tex_dirt(name))
-        for row in range(-(-self.h // BLOCK)):
-            for col in range(W // BLOCK):
-                self.put("dirt-a" if (row + col) % 2 else "dirt-b", col * BLOCK, row * BLOCK)
-        self.rect(0, 0, W, self.h, "#000", f' opacity="{dim}"')
+    def text(self, x, y, size, string, fill, face="sans", anchor="start", spacing=0):
+        """Draws `string` with its baseline at y and returns its width. `spacing` is tracking in em/1000."""
+        width = text_w(string, size, face, spacing)
+        x = x - width / 2 if anchor == "middle" else x - width if anchor == "end" else x
+        uses, pen = [], 0
+        for ch in string:
+            f = face if ch in GLYPHS[face] else "sans"
+            ch = ch if ch in GLYPHS[f] else "?"
+            advance, d = GLYPHS[f][ch]
+            if d:
+                gid = f"{f[:2]}{ord(ch):x}"
+                self.defs[gid] = f'<path id="{gid}" d="{d}"/>'
+                uses.append(f'<use href="#{gid}" x="{pen}"/>')
+            pen += advance + spacing
+        self.add(f'<g fill="{fill}" transform="translate({x:.1f} {y}) scale({size / 1000:.4f})">{"".join(uses)}</g>')
+        return width
 
     def render(self):
-        return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{self.h}" '
-                f'viewBox="0 0 {W} {self.h}" shape-rendering="crispEdges" role="img" '
-                f'aria-label="{html.escape(self.label)}"><title>{html.escape(self.label)}</title>'
+        return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{self.w}" height="{self.h}" '
+                f'viewBox="0 0 {self.w} {self.h}" role="img" aria-label="{html.escape(self.label)}">'
+                f'<title>{html.escape(self.label)}</title>'
                 f'<defs>{"".join(self.defs.values())}</defs>{"".join(self.body)}</svg>\n')
 
 
-def text_w(string, s):
-    return max(0, len(string) * 6 - 1) * s
+def text_w(string, size, face="sans", spacing=0):
+    sans = GLYPHS["sans"]
+    units = sum((GLYPHS[face].get(ch) or sans.get(ch) or sans["?"])[0] + spacing for ch in string)
+    return units * size / 1000
 
 
-def fit(string, chars):
-    return string if len(string) <= chars else string[: chars - 1].rstrip() + "…"
+def fit(string, size, width, face="sans"):
+    if text_w(string, size, face) <= width:
+        return string
+    while string and text_w(string + "…", size, face) > width:
+        string = string[:-1]
+    return string.rstrip(" ,.;:") + "…"
 
 
-def banner(d):
-    h = 360
-    c = Canvas(h, f'{d["name"]}. {d["bio"]}')
-    sky = ["#6f9df7", "#7aa6f8", "#86aff9", "#92b8fa", "#9ec1fb", "#aacafc", "#b6d3fd", "#c2dcfe"]
-    for i, colour in enumerate(sky):
-        c.rect(0, i * 45, W, 45, colour)
-    c.rect(750, 26, 72, 72, "#fff3a8", ' opacity=".55"')
-    c.rect(758, 34, 56, 56, "#fffbe0")
+def wrap(words, size, width, face="sans", joiner=" "):
+    lines, line = [], []
+    for word in words:
+        if line and text_w(joiner.join(line + [word]), size, face) > width:
+            lines.append(line)
+            line = []
+        line.append(word)
+    return lines + [line] if line else lines
 
-    clouds = [(60, 96, [(1, 0, 4), (0, 1, 7), (2, 2, 4)]), (150, 78, [(2, 0, 3), (0, 1, 8)]),
-              (20, 120, [(1, 0, 5), (0, 1, 6), (1, 2, 3)])]
-    for i, (y, dur, rows) in enumerate(clouds):
-        rects = "".join(f'<rect x="{x * 12}" y="{y + r * 12}" width="{w * 12}" height="12"/>' for x, r, w in rows)
-        c.add(f'<g fill="#fff" opacity=".8">{rects}<animateTransform attributeName="transform" '
-              f'type="translate" from="-120 0" to="{W + 20} 0" dur="{dur}s" begin="-{dur * (i + 1) // 4}s" '
-              f'repeatCount="indefinite"/></g>')
 
-    for t in ("grass-a", "grass-b"):
-        c.tex(t, tex_grass(t))
-    for t in ("dirt-a", "dirt-b"):
-        c.tex(t, tex_dirt(t))
-    c.tex("log", tex_log("log"))
-    c.tex("leaves", noise("leaves", ["#3f7a2a", "#4c9133", "#35681f", "#2c5719"], [4, 3, 2, 1]))
-    c.tex("water", noise("water", ["#3f76e4", "#4a80ea", "#386bd2"], [5, 2, 2]))
+def header(d, theme):
+    h = 300
+    c = Canvas(h, f'{d["name"]}. {d["bio"]}', theme)
+    t = c.t
+    c.defs["clip"] = f'<clipPath id="clip"><rect width="{W}" height="{h}" rx="28"/></clipPath>'
+    c.defs["blur"] = ('<filter id="blur" x="-50%" y="-50%" width="200%" height="200%">'
+                      '<feGaussianBlur stdDeviation="70"/></filter>')
+    c.add(f'<g clip-path="url(#clip)"><rect width="{W}" height="{h}" fill="{t["base"]}"/><g filter="url(#blur)">')
+    # three soft pools of colour, drifting slowly
+    pools = [(620, 60, 200), (800, 280, 180), (420, 300, 170)]
+    drifts = [(-70, 40), (-50, -60), (80, -30)]
+    for colour, (cx, cy, r), (dx, dy), dur in zip(t["glow"], pools, drifts, (26, 32, 38)):
+        c.add(f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="{colour}"><animateTransform attributeName="transform" '
+              f'type="translate" values="0 0;{dx} {dy};0 0" dur="{dur}s" repeatCount="indefinite" '
+              'calcMode="spline" keyTimes="0;0.5;1" keySplines=".45 0 .55 1;.45 0 .55 1"/></circle>')
+    c.add("</g></g>")
 
-    heights = [2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3]
-    for col, height in enumerate(heights):
-        pond = height == 1
-        for level in range(height):
-            top = level == height - 1 and not pond
-            name = ("grass-" if top else "dirt-") + "ab"[(col + level) % 2]
-            c.put(name, col * BLOCK, h - (level + 1) * BLOCK)
-        if pond:
-            c.put("water", col * BLOCK, h - 2 * BLOCK)
-            c.rect(col * BLOCK, h - 2 * BLOCK, BLOCK, 6, "#c2dcfe")
-
-    ground = h - 2 * BLOCK
-    for cx, cy in [(1, 3), (2, 3), (3, 3), (1, 4), (2, 4), (3, 4), (2, 5)]:
-        c.put("leaves", cx * BLOCK, ground - cy * BLOCK)
-    for level in (1, 2):
-        c.put("log", 2 * BLOCK, ground - level * BLOCK)
-
-    title = d["name"].upper()
-    s = max(4, min(12, (W - 380) // (len(title) * 6)))
-    y = 40 + (12 - s) * 4
-    c.add('<g opacity=".3">')
-    c.text(W // 2 + s // 2, y + s + s // 2, s, title, "#000000", shadow=False, anchor="middle")
-    c.add("</g>")
-    for depth in range(1, 4):
-        c.text(W // 2, y + depth * s // 3, s, title, "#4a4a4a", shadow=False, anchor="middle")
-    c.defs["stone"] = ('<linearGradient id="stone" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/>'
-          '<stop offset="1" stop-color="#b9b9b9"/></linearGradient>')
-    c.text(W // 2, y, s, title, "url(#stone)", shadow=False, anchor="middle")
-
-    for i, line in enumerate(textwrap.wrap(d["bio"], 44)[:3]):
-        c.text(W // 2, 174 + i * 24, 2, line, "#ffffff", anchor="middle")
-
-    splashes = CONFIG.get("splashes") or [""]
-    splash = splashes[datetime.date.today().isocalendar()[1] % len(splashes)]
-    if splash:
-        edge = W // 2 + text_w(title, s) // 2
-        c.add(f'<g transform="translate({min(edge + 30, W - 150)} 132) rotate(-18)"><g>'
-              '<animateTransform attributeName="transform" type="scale" values="1;1.07;1" dur="0.9s" '
-              'repeatCount="indefinite"/>')
-        c.text(0, -7, 2, splash, "#ffff55", anchor="middle")
-        c.add("</g></g>")
+    x = 56
+    status = CONFIG.get("status")
+    if status:
+        c.add(f'<circle cx="{x + 4}" cy="60" r="4" fill="#7fa58a"/>')
+        c.text(x + 18, 65, 12.5, status.upper(), t["muted"], spacing=110)
+    size = 104
+    while text_w(d["name"], size, "serif") > W - 2 * x and size > 40:
+        size -= 4
+    c.text(x - 4, 168, size, d["name"], t["ink"], face="serif")
+    for i, line in enumerate(wrap(d["bio"].split(), 18, 500)[:3]):
+        c.text(x, 214 + i * 27, 18, " ".join(line), t["muted"])
     return c.render()
 
 
-def slot(c, x, y, item=None):
-    c.rect(x, y, 72, 72, "#373737")
-    c.rect(x + 4, y + 4, 68, 68, "#ffffff")
-    c.rect(x + 4, y + 4, 64, 64, "#8b8b8b")
-    if not item:
-        return
-    name, abbr, colour, count = item
-    tid = c.tex("item-" + re.sub(r"\W", "", name.lower()), tex_block(name, colour))
-    c.put(tid, x + 12, y + 12)
-    c.text(x + 37, y + 28, 2, abbr, "#ffffff", anchor="middle")
-    if count > 1:  # a single item shows no number, same as the game
-        c.text(x + 66, y + 50, 2, str(count), "#ffffff", anchor="end")
-    c.text(x + 36, y + 82, 2, fit(name, 11), "#3f3f3f", shadow=False, anchor="middle")
+def label(c, y, string):
+    c.text(0, y, 11.5, string.upper(), c.t["muted"], spacing=140)
 
 
-def inventory(d):
-    items = d["stack"]
-    rows = [items[i:i + 6] for i in range(0, len(items), 6)]
-    h = 62 + 114 * len(rows) + 10
-    stack = ", ".join(i[0] for i in items)
-    c = Canvas(h, f"Inventory. Tech stack: {stack}")
-    c.rect(4, 0, W - 8, h, "#000")
-    c.rect(0, 4, W, h - 8, "#000")
-    c.rect(4, 4, W - 8, h - 8, "#555555")
-    c.rect(4, 4, W - 12, h - 12, "#ffffff")
-    c.rect(8, 8, W - 16, h - 16, "#c6c6c6")
-    c.text(PAD, 24, 3, "Inventory", "#3f3f3f", shadow=False)
-    for r, row in enumerate(rows):
-        for i in range(6):
-            slot(c, PAD + i * 136 + 32, 62 + r * 114, row[i] if i < len(row) else None)
+def stack(d, theme):
+    lines = wrap(d["stack"], 17, W - 8, joiner="  ·  ")
+    c = Canvas(64 + 32 * len(lines), "Stack: " + ", ".join(d["stack"]), theme)
+    label(c, 30, "Stack")
+    for i, line in enumerate(lines):
+        x = 0
+        for j, item in enumerate(line):
+            if j:
+                x += c.text(x, 66 + i * 32, 17, "  ·  ", c.t["muted"])
+            x += c.text(x, 66 + i * 32, 17, item, c.t["ink"])
     return c.render()
 
 
-def section(title):
-    c = Canvas(64, title)
-    c.dirt_backdrop(.55)
-    c.text(W // 2, 22, 3, title, "#ffffff", anchor="middle")
+def heading(title, theme):
+    c = Canvas(52, title, theme)
+    label(c, 30, title)
     return c.render()
 
 
-def world(repo, d):
+def project(repo, d, theme):
     own = repo["owner"]["login"] == d["login"]
-    name = (repo["name"] if own else repo["nameWithOwner"]).strip("-_")
-    desc = textwrap.wrap(describe(repo, 116), 58)[:2]
-    lang = repo.get("primaryLanguage") or {"name": "", "color": "#8b8b8b"}
-    h = 132
-    c = Canvas(h, f'{name}: {" ".join(desc)}')
-    c.dirt_backdrop()
-    c.rect(4, 4, W - 8, h - 8, "none", ' stroke="#808080" stroke-width="2"')
+    name = repo["name"].strip("-_")
+    c = Canvas(104, f"{name}: {describe(repo, 116)}", theme)
+    t = c.t
+    c.line(0)
+    x = c.text(0, 46, 31, name, t["ink"], face="serif")
+    if not own:
+        c.text(x + 12, 46, 19, f'with {repo["owner"]["login"]}', t["muted"], face="italic")
 
-    c.rect(22, 24, 84, 84, "#000")
-    c.put(c.tex("icon", tex_block(repo["nameWithOwner"], lang["color"] or "#8b8b8b")), 24, 26, 5)
-    c.text(67, 48, 5, name[:1].upper(), "#ffffff", anchor="middle")
-
-    c.text(124, 20, 3, fit(name, 34), "#ffffff")
-    if repo["stargazerCount"]:
-        c.text(W - PAD, 23, 2, f'★ {repo["stargazerCount"]}', "#ffff55", anchor="end")
-    for i, line in enumerate(desc):
-        c.text(124, 54 + i * 22, 2, line, "#aaaaaa")
-
-    tags = ([] if own else ["Contributor"]) + [lang["name"]] * bool(lang["name"]) + [t[0] for t in techs(repo)[:2]]
-    x = 124
-    if lang["name"]:
-        c.rect(x, 104, 14, 14, lang["color"] or "#8b8b8b")
-        x += 24
-    c.text(x, 104, 2, fit(" · ".join(tags), 40), "#8c8c8c")
+    lang = repo.get("primaryLanguage") or {}
     pushed = datetime.datetime.fromisoformat(repo["pushedAt"].replace("Z", "+00:00"))
-    c.text(W - PAD, 104, 2, f"{pushed.day} {pushed:%b %Y}", "#8c8c8c", anchor="end")
+    c.text(W, 40, 13.5, f"{pushed:%b %Y}", t["muted"], anchor="end")
+    tags = [lang["name"]] * bool(lang.get("name")) + techs(repo)[:2]
+    right = c.text(W, 74, 13.5, "  ·  ".join(tags), t["muted"], anchor="end")
+    if lang.get("name"):
+        dot = lang.get("color") or t["muted"]
+        c.add(f'<circle cx="{W - right - 12:.1f}" cy="69.5" r="3.5" fill="{dot}" opacity=".85"/>')
+    c.text(0, 74, 15.5, fit(describe(repo, 116), 15.5, W - right - 60), t["muted"])
     return c.render()
 
 
-def statistics(d):
-    rows = [("Contributions, last 12 months", f'{d["contributions"]:,}'),
-            ("Public repositories", str(d["repo_count"]))]
-    if d["stars"]:
-        rows.append(("Stars earned", f'{d["stars"]:,}'))
+def footer(d, theme):
+    parts = [f'{d["contributions"]:,} contributions in the last year', f'{d["repo_count"]} repositories']
     if d["top_language"]:
-        rows.append(("Most used language", d["top_language"]))
-    bar_y = 64 + 32 * len(rows) + 46
-    h = bar_y + 20 + 28
-    c = Canvas(h, "Statistics. " + ", ".join(f"{k}: {v}" for k, v in rows))
-    c.dirt_backdrop()
-    c.text(W // 2, 22, 3, "Statistics", "#ffffff", anchor="middle")
-    for i, (key, value) in enumerate(rows):
-        if i % 2 == 0:
-            c.rect(PAD, 64 + i * 32, W - 2 * PAD, 32, "#ffffff", ' opacity=".06"')
-        c.text(PAD + 16, 72 + i * 32, 2, key, "#ffffff")
-        c.text(W - PAD - 16, 72 + i * 32, 2, value, "#ffff55", anchor="end")
-
-    # XP bar: the level is contributions this year, the fill is progress to the next hundred.
-    x, w = 68, 728
-    c.rect(x - 4, bar_y - 4, w + 8, 28, "#000")
-    c.rect(x, bar_y, w, 20, "#2f2f2f")
-    filled = round(w * (d["contributions"] % 100) / 100 / 4) * 4
-    c.rect(x, bar_y, filled, 20, "#7ee030")
-    c.rect(x, bar_y, filled, 4, "#b9f77c")
-    c.rect(x, bar_y + 16, filled, 4, "#4e9a1a")
-    for i in range(1, 18):
-        c.rect(x + i * 40 + 2, bar_y, 4, 20, "#000", ' opacity=".4"')
-    c.text(W // 2, bar_y - 30, 3, str(d["contributions"]), "#80ff20", anchor="middle", outline="#000000")
+        parts.append(f'mostly {d["top_language"]}')
+    c = Canvas(64, ", ".join(parts), theme)
+    c.line(0)
+    c.text(W / 2, 42, 13.5, "   ·   ".join(parts), c.t["muted"], anchor="middle")
     return c.render()
 
 
-def button(label):
-    c = Canvas(48, label)
-    w = 272
-    c.rect(0, 0, w, 48, "#000")
-    c.rect(4, 4, w - 8, 40, "#6f6f6f")
-    c.rect(4, 4, w - 8, 4, "#aaaaaa")
-    c.rect(4, 4, 4, 36, "#aaaaaa")
-    c.rect(4, 36, w - 8, 8, "#565656")
-    c.text(w // 2, 16, 2, fit(label, 20), "#ffffff", anchor="middle")
-    return c.render().replace(f'width="{W}"', f'width="{w}"', 1).replace(f"0 0 {W} 48", f"0 0 {w} 48", 1)
+def link_w(text):
+    return round(text_w(text, 24, "italic") + 34)
+
+
+def link(text, theme):
+    c = Canvas(44, text, theme, link_w(text))
+    x = c.text(0, 30, 24, text, c.t["ink"], face="italic")
+    c.text(x + 8, 29, 17, "↗", c.t["muted"])
+    return c.render()
 
 
 # ---------------------------------------------------------------- output
@@ -550,38 +387,35 @@ def build(user):
     for old in ASSETS.glob("*.svg"):
         old.unlink()
 
-    def save(name, svg):
-        (ASSETS / name).write_text(svg, encoding="utf-8", newline="\n")
-        return f"assets/{name}"
+    def picture(name, draw, alt, width="100%"):
+        for theme in THEMES:
+            (ASSETS / f"{name}-{theme}.svg").write_text(draw(theme), encoding="utf-8", newline="\n")
+        return (f'<picture><source media="(prefers-color-scheme: dark)" srcset="assets/{name}-dark.svg">'
+                f'<img src="assets/{name}-light.svg" width="{width}" alt="{html.escape(alt, quote=True)}"></picture>')
 
-    def img(src, alt, width="100%"):
-        return f'<img src="{src}" width="{width}" alt="{html.escape(alt, quote=True)}">'
-
-    stack = ", ".join(i[0] for i in d["stack"])
     out = ["<!-- Generated by scripts/build.py. Change config.json or the script, not this file. -->", "",
-           f'<p align="center">{img(save("banner.svg", banner(d)), d["name"] + ". " + d["bio"])}</p>', ""]
-    if stack:
-        out += [f'<p align="center">{img(save("inventory.svg", inventory(d)), "Tech stack: " + stack)}</p>', ""]
+           picture("header", lambda th: header(d, th), f'{d["name"]}. {d["bio"]}'), ""]
+    if d["stack"]:
+        out += [picture("stack", lambda th: stack(d, th), "Stack: " + ", ".join(d["stack"])), ""]
     if d["worlds"]:
-        out.append('<p align="center">')
-        out.append(img(save("worlds.svg", section("Select World")), "Projects"))
+        out.append(picture("work", lambda th: heading("Selected work", th), "Selected work"))
         for repo in d["worlds"]:
-            src = save(f'world-{slug(repo["nameWithOwner"].split("/", 1)[1] if repo["owner"]["login"] == d["login"] else repo["nameWithOwner"])}.svg', world(repo, d))
+            own = repo["owner"]["login"] == d["login"]
+            name = f'project-{slug(repo["name"] if own else repo["nameWithOwner"])}'
             alt = f'{repo["name"].strip("-_")}: {describe(repo, 116)}'
-            out.append(f'<a href="{html.escape(repo["url"], quote=True)}">{img(src, alt)}</a>')
-        out += ["</p>", ""]
-    stats_alt = f'{d["contributions"]} contributions in the last 12 months, {d["repo_count"]} public repositories'
-    out += [f'<p align="center">{img(save("statistics.svg", statistics(d)), stats_alt)}</p>', ""]
+            out.append(f'<a href="{html.escape(repo["url"], quote=True)}">'
+                       f'{picture(name, lambda th: project(repo, d, th), alt)}</a>')
+        out.append("")
+    out += [picture("footer", lambda th: footer(d, th),
+                    f'{d["contributions"]} contributions in the last year, {d["repo_count"]} repositories'), ""]
     if d["links"]:
         out.append('<p align="center">')
-        for label, url in d["links"]:
-            src = save(f"button-{slug(label)}.svg", button(label))
-            out.append(f'<a href="{html.escape(url, quote=True)}">{img(src, label, 272)}</a>')
+        for text, url in d["links"]:
+            out.append(f'<a href="{html.escape(url, quote=True)}">'
+                       f'{picture("link-" + slug(text), lambda th: link(text, th), text, link_w(text))}</a>')
         out += ["</p>", ""]
-    out += ['<p align="center"><sub>Rebuilt daily from live GitHub data by <a href="scripts/build.py">a script</a>. '
-            'Pixel font: <a href="https://github.com/IdreesInc/Monocraft">Monocraft</a>, OFL.</sub></p>', ""]
     (ROOT / "README.md").write_text("\n".join(out), encoding="utf-8", newline="\n")
-    print(f'Built README for {d["login"]}: {len(d["worlds"])} worlds, stack: {stack}')
+    print(f'Built README for {d["login"]}: {len(d["worlds"])} projects, stack: {", ".join(d["stack"])}')
 
 
 if __name__ == "__main__":
