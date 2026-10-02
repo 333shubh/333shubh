@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -76,7 +77,7 @@ query($login: String!) {
   }
 }
 fragment R on Repository {
-  name isArchived isFork
+  name nameWithOwner isArchived isFork
   owner { login }
   languages(first: 8, orderBy: {field: SIZE, direction: DESC}) { edges { size node { name } } }
   pkg: object(expression: "HEAD:package.json") { ... on Blob { text } }
@@ -181,7 +182,7 @@ def summarise(user):
         "language_share": share,
         "frameworks": frameworks[:12],
         "streak": streak,
-        "collaborations": len(contributed),
+        "collaborations": [r["nameWithOwner"] for r in contributed],
         "links": links,
         "contributions": calendar["totalContributions"],
         # the profile repo itself is not a project
@@ -335,20 +336,34 @@ def link(text, theme):
     return c.render()
 
 
-def summary(d, theme):
-    c = Canvas(142, "Summary. " + ", ".join(f"{n} {what}" for n, what in figures(d)), theme)
-    c.label(0, 30, "Summary")
-    for i, (number, what) in enumerate(figures(d)):
-        c.text(i * 216 - 2, 96, 52, number, c.t["ink"], face="serif")
-        c.text(i * 216, 120, 12.5, what, c.t["muted"])
+def heading(title, theme):
+    c = Canvas(52, title, theme)
+    c.label(0, 30, title)
+    return c.render()
+
+
+def figure(number, what, linked, theme):
+    c = Canvas(90, f"{number} {what}", theme, W // 4)
+    x = c.text(-2, 44, 52, number, c.t["ink"], face="serif")
+    if linked:
+        c.text(x + 6, 22, 15, "↗", c.t["muted"])
+    c.text(0, 68, 12.5, what, c.t["muted"])
     return c.render()
 
 
 def figures(d):
-    out = [(f'{d["contributions"]:,}', "contributions this year"), (str(d["streak"]), "day longest streak"),
-           (str(d["repo_count"]), "public repositories")]
-    if d["collaborations"]:
-        out.append((str(d["collaborations"]), "collaborations"))
+    """(number, caption, link) for each summary figure; a link opens the list being counted."""
+    profile = f'https://github.com/{d["login"]}'
+    out = [(f'{d["contributions"]:,}', "contributions this year", None),
+           (str(d["streak"]), "day longest streak", None),
+           (str(d["repo_count"]), "public repositories", f"{profile}?tab=repositories")]
+    repos = d["collaborations"]
+    if len(repos) == 1:
+        out.append(("1", "collaboration", f"https://github.com/{repos[0]}"))
+    elif repos:
+        # GitHub has no page for repos contributed to, so search for exactly these
+        query = urllib.parse.quote(" ".join(f"repo:{r}" for r in repos))
+        out.append((str(len(repos)), "collaborations", f"https://github.com/search?q={query}&type=repositories"))
     return out
 
 
@@ -376,7 +391,12 @@ def build(user):
     if d["language_share"] or d["frameworks"]:
         alt = ", ".join([f"{n} {p}%" for n, p in d["language_share"]] + d["frameworks"])
         out += [picture("stack", lambda th: stack(d, th), "Stack: " + alt), ""]
-    out += [picture("summary", lambda th: summary(d, th), ", ".join(f"{n} {what}" for n, what in figures(d))), ""]
+    row = []
+    for number, what, url in figures(d):
+        image = picture("figure-" + slug(what), lambda th: figure(number, what, url, th), f"{number} {what}", "25%")
+        row.append(f'<a href="{html.escape(url, quote=True)}">{image}</a>' if url else image)
+    # one line, no gaps: whitespace between the images would push the fourth onto a new row
+    out += [picture("summary", lambda th: heading("Summary", th), "Summary"), "<p>" + "".join(row) + "</p>", ""]
     if d["links"]:
         out.append('<p align="center">')
         for text, url in d["links"]:
