@@ -24,11 +24,11 @@ GLYPHS = json.loads((ROOT / "scripts" / "glyphs.json").read_text(encoding="utf-8
 CONFIG = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))
 
 W = 864
-THEMES = {
-    "light": {"ink": "#2b2a27", "muted": "#85827a", "line": "#e4e0d8", "base": "#f5f2ec",
-              "glow": ["#d9e6d6", "#f4e1d2", "#e2ddf1"]},
-    "dark": {"ink": "#e9e5dd", "muted": "#8f8c85", "line": "#2b2e33", "base": "#16191d",
-             "glow": ["#22362c", "#35283a", "#1f2c3d"]},
+THEMES = {  # greys only
+    "light": {"ink": "#111111", "muted": "#767676", "line": "#e6e6e6", "faint": "#d2d2d2", "ring": "#cfcfcf",
+              "base": "#f4f4f4", "glow": ["#dcdcdc", "#ffffff", "#e4e4e4"]},
+    "dark": {"ink": "#f2f2f2", "muted": "#8c8c8c", "line": "#2a2a2a", "faint": "#3d3d3d", "ring": "#383838",
+             "base": "#131313", "glow": ["#303030", "#050505", "#262626"]},
 }
 
 # Dependency name -> stack item, in display priority order.
@@ -67,7 +67,8 @@ query($login: String!) {
   user(login: $login) {
     name login bio websiteUrl
     socialAccounts(first: 6) { nodes { provider url } }
-    contributionsCollection { contributionCalendar { totalContributions } }
+    contributionsCollection { contributionCalendar { totalContributions
+      weeks { contributionDays { contributionCount date weekday } } } }
     pinnedItems(first: 6, types: REPOSITORY) { nodes { ... on Repository { ...R } } }
     repositories(first: 100, ownerAffiliations: OWNER, privacy: PUBLIC, isFork: false,
                  orderBy: {field: PUSHED_AT, direction: DESC}) { totalCount nodes { ...R } }
@@ -79,6 +80,7 @@ fragment R on Repository {
   name nameWithOwner url description stargazerCount pushedAt isArchived isFork
   owner { login }
   primaryLanguage { name color }
+  defaultBranchRef { target { ... on Commit { history { totalCount } } } }
   languages(first: 8, orderBy: {field: SIZE, direction: DESC}) { edges { size node { name color } } }
   pkg: object(expression: "HEAD:package.json") { ... on Blob { text } }
   pkgFrontend: object(expression: "HEAD:frontend/package.json") { ... on Blob { text } }
@@ -193,7 +195,22 @@ def summarise(user):
         for t in techs(r):
             counts[t] = counts.get(t, 0) + 1
     frameworks = sorted((t[0] for t in TECH if t[0] in counts), key=lambda t: -counts[t])
-    stack = (languages + frameworks)[:12]
+    share, other = [], 100
+    for name, v in sorted(langs.items(), key=lambda kv: -kv[1]["size"])[:4]:
+        pct = round(100 * v["size"] / all_bytes)
+        if pct >= 2:
+            share.append((LANG_LABEL.get(name, name), pct))
+            other -= pct
+    if share and other >= 2:
+        share.append(("Other", other))
+
+    calendar = user["contributionsCollection"]["contributionCalendar"]
+    weeks = [[{"count": day["contributionCount"], "date": day["date"], "weekday": day["weekday"]}
+              for day in week["contributionDays"]] for week in calendar.get("weeks", [])]
+    streak = run = 0
+    for day in (day for week in weeks for day in week):
+        run = run + 1 if day["count"] else 0
+        streak = max(streak, run)
 
     links = [(PROVIDERS.get(a["provider"], re.sub(r"^https?://(www\.)?|/.*$", "", a["url"])), a["url"])
              for a in (user.get("socialAccounts") or {}).get("nodes", [])]
@@ -207,9 +224,14 @@ def summarise(user):
         "name": user.get("name") or user["login"],
         "bio": user.get("bio") or "",
         "worlds": worlds,
-        "stack": stack,
+        "language_share": share,
+        "frameworks": frameworks[:12],
+        "weeks": weeks,
+        "active_days": sum(1 for week in weeks for day in week if day["count"]),
+        "streak": streak,
+        "latest": own[0]["name"].strip("-_") if own else "",
         "links": links,
-        "contributions": user["contributionsCollection"]["contributionCalendar"]["totalContributions"],
+        "contributions": calendar["totalContributions"],
         # the profile repo itself is not a project
         "repo_count": user["repositories"]["totalCount"] - any(r["name"] == user["login"] for r in user["repositories"]["nodes"]),
         "stars": sum(r["stargazerCount"] for r in own),
@@ -221,7 +243,7 @@ def summarise(user):
 
 class Canvas:
     def __init__(self, h, label, theme, w=W):
-        self.w, self.h, self.label, self.t = w, h, label, THEMES[theme]
+        self.w, self.h, self.title, self.t = w, h, label, THEMES[theme]
         self.defs, self.body = {}, []
 
     def add(self, s):
@@ -247,25 +269,21 @@ class Canvas:
         self.add(f'<g fill="{fill}" transform="translate({x:.1f} {y}) scale({size / 1000:.4f})">{"".join(uses)}</g>')
         return width
 
+    def label(self, x, y, string, anchor="start"):
+        return self.text(x, y, 11.5, string.upper(), self.t["muted"], spacing=140, anchor=anchor)
+
     def render(self):
         return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{self.w}" height="{self.h}" '
-                f'viewBox="0 0 {self.w} {self.h}" role="img" aria-label="{html.escape(self.label)}">'
-                f'<title>{html.escape(self.label)}</title>'
+                f'viewBox="0 0 {self.w} {self.h}" role="img" aria-label="{html.escape(self.title)}">'
+                f'<title>{html.escape(self.title)}</title>'
                 f'<defs>{"".join(self.defs.values())}</defs>{"".join(self.body)}</svg>\n')
+
 
 
 def text_w(string, size, face="sans", spacing=0):
     sans = GLYPHS["sans"]
     units = sum((GLYPHS[face].get(ch) or sans.get(ch) or sans["?"])[0] + spacing for ch in string)
     return units * size / 1000
-
-
-def fit(string, size, width, face="sans"):
-    if text_w(string, size, face) <= width:
-        return string
-    while string and text_w(string + "…", size, face) > width:
-        string = string[:-1]
-    return string.rstrip(" ,.;:") + "…"
 
 
 def wrap(words, size, width, face="sans", joiner=" "):
@@ -278,6 +296,12 @@ def wrap(words, size, width, face="sans", joiner=" "):
     return lines + [line] if line else lines
 
 
+def grey(a, b, t):
+    """A grey between hex colours a and b."""
+    x, y = int(a[1:3], 16), int(b[1:3], 16)
+    return "#" + f"{round(x + (y - x) * t):02x}" * 3
+
+
 def header(d, theme):
     h = 300
     c = Canvas(h, f'{d["name"]}. {d["bio"]}', theme)
@@ -286,81 +310,135 @@ def header(d, theme):
     c.defs["blur"] = ('<filter id="blur" x="-50%" y="-50%" width="200%" height="200%">'
                       '<feGaussianBlur stdDeviation="70"/></filter>')
     c.add(f'<g clip-path="url(#clip)"><rect width="{W}" height="{h}" fill="{t["base"]}"/><g filter="url(#blur)">')
-    # three soft pools of colour, drifting slowly
-    pools = [(620, 60, 200), (800, 280, 180), (420, 300, 170)]
+    # three soft pools of grey, drifting slowly
+    pools = [(620, 40, 200), (840, 290, 190), (400, 320, 170)]
     drifts = [(-70, 40), (-50, -60), (80, -30)]
     for colour, (cx, cy, r), (dx, dy), dur in zip(t["glow"], pools, drifts, (26, 32, 38)):
         c.add(f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="{colour}"><animateTransform attributeName="transform" '
               f'type="translate" values="0 0;{dx} {dy};0 0" dur="{dur}s" repeatCount="indefinite" '
               'calcMode="spline" keyTimes="0;0.5;1" keySplines=".45 0 .55 1;.45 0 .55 1"/></circle>')
-    c.add("</g></g>")
+    c.add("</g>")
+    # orbits: hairline rings with a point travelling round two of them
+    ox, oy = 694, 168
+    for i, r in enumerate((52, 96, 140, 184)):
+        c.add(f'<circle cx="{ox}" cy="{oy}" r="{r}" fill="none" stroke="{t["ring"]}" stroke-width="1"/>')
+        if i % 2 == 0:
+            c.add(f'<circle cx="{ox + r}" cy="{oy}" r="{3.5 - i / 2}" fill="{t["ink"]}"><animateTransform '
+                  f'attributeName="transform" type="rotate" from="{40 + i * 80} {ox} {oy}" '
+                  f'to="{400 + i * 80} {ox} {oy}" dur="{36 + i * 22}s" repeatCount="indefinite"/></circle>')
+    c.add(f'<circle cx="{ox}" cy="{oy}" r="2" fill="{t["ink"]}"/></g>')
 
     x = 56
-    status = CONFIG.get("status")
-    if status:
-        c.add(f'<circle cx="{x + 4}" cy="60" r="4" fill="#7fa58a"/>')
-        c.text(x + 18, 65, 12.5, status.upper(), t["muted"], spacing=110)
+    notes = [n for n in (CONFIG.get("status"), d["latest"] and f'Now building {d["latest"]}') if n]
+    if notes:
+        c.add(f'<circle cx="{x + 4}" cy="60" r="4" fill="{t["ink"]}"/>')
+        c.text(x + 18, 65, 12, "   /   ".join(notes).upper(), t["muted"], spacing=110)
     size = 104
-    while text_w(d["name"], size, "serif") > W - 2 * x and size > 40:
+    while text_w(d["name"], size, "serif") > 420 and size > 44:
         size -= 4
     c.text(x - 4, 168, size, d["name"], t["ink"], face="serif")
-    for i, line in enumerate(wrap(d["bio"].split(), 18, 500)[:3]):
+    for i, line in enumerate(wrap(d["bio"].split(), 18, 420)[:3]):
         c.text(x, 214 + i * 27, 18, " ".join(line), t["muted"])
     return c.render()
 
 
-def label(c, y, string):
-    c.text(0, y, 11.5, string.upper(), c.t["muted"], spacing=140)
+def activity(d, theme):
+    figures = [(f'{d["contributions"]:,}', "contributions this year"), (str(d["active_days"]), "active days"),
+               (str(d["streak"]), "day longest streak"), (str(d["repo_count"]), "public repositories")]
+    c = Canvas(310, "Activity. " + ", ".join(f"{n} {what}" for n, what in figures), theme)
+    t = c.t
+    c.label(0, 30, "Activity")
+    for i, (number, what) in enumerate(figures):
+        c.text(i * 216 - 2, 96, 52, number, t["ink"], face="serif")
+        c.text(i * 216, 120, 12.5, what, t["muted"])
+
+    # the year as a halftone: one dot per day, sized by that day's contributions
+    weeks = d["weeks"][-53:]
+    peak = max([day["count"] for week in weeks for day in week] + [1])
+    pitch, top = 16, 162
+    left = (W - pitch * len(weeks)) / 2 + pitch / 2
+    month = None
+    for col, week in enumerate(weeks):
+        for day in week:
+            cx, cy = left + col * pitch, top + day["weekday"] * pitch
+            if day["count"]:
+                c.add(f'<circle cx="{cx:.1f}" cy="{cy}" r="{2 + 4.6 * (day["count"] / peak) ** .5:.2f}" fill="{t["ink"]}"/>')
+            else:
+                c.add(f'<circle cx="{cx:.1f}" cy="{cy}" r="1.1" fill="{t["faint"]}"/>')
+        first = datetime.date.fromisoformat(week[0]["date"])
+        if first.month != month and col < len(weeks) - 2:
+            if month is not None or first.day <= 7:
+                c.text(left + col * pitch - 4, top + 7 * pitch + 14, 11, f"{first:%b}", t["muted"])
+            month = first.month
+    return c.render()
 
 
 def stack(d, theme):
-    lines = wrap(d["stack"], 17, W - 8, joiner="  ·  ")
-    c = Canvas(64 + 32 * len(lines), "Stack: " + ", ".join(d["stack"]), theme)
-    label(c, 30, "Stack")
+    lines = wrap(d["frameworks"], 17, W - 8, joiner="  ·  ")
+    langs = d["language_share"]
+    h = 46 + (70 if langs else 0) + 32 * len(lines) + 12
+    c = Canvas(h, "Stack. " + ", ".join(f"{n} {p}%" for n, p in langs) + ". " + ", ".join(d["frameworks"]), theme)
+    t = c.t
+    c.label(0, 30, "Stack")
+    y = 46
+    if langs:
+        # one bar, split by share of code; darkest is the most used
+        x = 0
+        for i, (name, pct) in enumerate(langs):
+            shade = grey(t["ink"], t["faint"], i / max(1, len(langs) - 1))
+            w = max(6, (W - 3 * (len(langs) - 1)) * pct / 100)
+            c.add(f'<rect x="{x:.1f}" y="{y + 6}" width="{w:.1f}" height="8" rx="2" fill="{shade}"/>')
+            x += w + 3
+        x = 0
+        for i, (name, pct) in enumerate(langs):
+            shade = grey(t["ink"], t["faint"], i / max(1, len(langs) - 1))
+            c.add(f'<rect x="{x:.1f}" y="{y + 31}" width="9" height="9" rx="2" fill="{shade}"/>')
+            x += 16 + c.text(x + 16, y + 40, 14, name, t["ink"])
+            x += 6 + c.text(x + 6, y + 40, 14, f"{pct}%", t["muted"]) + 30
+        y += 70
     for i, line in enumerate(lines):
         x = 0
         for j, item in enumerate(line):
             if j:
-                x += c.text(x, 66 + i * 32, 17, "  ·  ", c.t["muted"])
-            x += c.text(x, 66 + i * 32, 17, item, c.t["ink"])
+                x += c.text(x, y + 22 + i * 32, 17, "  ·  ", t["muted"])
+            x += c.text(x, y + 22 + i * 32, 17, item, t["ink"])
     return c.render()
 
 
 def heading(title, theme):
     c = Canvas(52, title, theme)
-    label(c, 30, title)
+    c.label(0, 30, title)
     return c.render()
 
 
-def project(repo, d, theme):
+def project(repo, index, d, theme):
     own = repo["owner"]["login"] == d["login"]
     name = repo["name"].strip("-_")
-    c = Canvas(104, f"{name}: {describe(repo, 116)}", theme)
+    desc = wrap(describe(repo, 170).split(), 15.5, 600)[:2]
+    tags = [repo["primaryLanguage"]["name"]] * bool(repo.get("primaryLanguage")) + techs(repo)[:4]
+    tag_y = 76 + 23 * len(desc) + 4
+    c = Canvas(tag_y + 28, f"{name}: {describe(repo, 170)}", theme)
     t = c.t
     c.line(0)
-    x = c.text(0, 46, 31, name, t["ink"], face="serif")
+    c.text(0, 44, 12, f"{index:02d}", t["muted"], spacing=80)
+    x = 44 + c.text(44, 46, 31, name, t["ink"], face="serif")
     if not own:
         c.text(x + 12, 46, 19, f'with {repo["owner"]["login"]}', t["muted"], face="italic")
+    for i, line in enumerate(desc):
+        c.text(44, 76 + i * 23, 15.5, " ".join(line), t["muted"])
+    c.text(44, tag_y, 13, "  ·  ".join(tags), t["ink"])
 
-    lang = repo.get("primaryLanguage") or {}
     pushed = datetime.datetime.fromisoformat(repo["pushedAt"].replace("Z", "+00:00"))
-    c.text(W, 40, 13.5, f"{pushed:%b %Y}", t["muted"], anchor="end")
-    tags = [lang["name"]] * bool(lang.get("name")) + techs(repo)[:2]
-    right = c.text(W, 74, 13.5, "  ·  ".join(tags), t["muted"], anchor="end")
-    if lang.get("name"):
-        dot = lang.get("color") or t["muted"]
-        c.add(f'<circle cx="{W - right - 12:.1f}" cy="69.5" r="3.5" fill="{dot}" opacity=".85"/>')
-    c.text(0, 74, 15.5, fit(describe(repo, 116), 15.5, W - right - 60), t["muted"])
-    return c.render()
-
-
-def footer(d, theme):
-    parts = [f'{d["contributions"]:,} contributions in the last year', f'{d["repo_count"]} repositories']
-    if d["top_language"]:
-        parts.append(f'mostly {d["top_language"]}')
-    c = Canvas(64, ", ".join(parts), theme)
-    c.line(0)
-    c.text(W / 2, 42, 13.5, "   ·   ".join(parts), c.t["muted"], anchor="middle")
+    facts = [f"{pushed:%b %Y}"]
+    commits = (((repo.get("defaultBranchRef") or {}).get("target") or {}).get("history") or {}).get("totalCount")
+    if commits:
+        facts.append(f"{commits:,} commit{'s' * (commits != 1)}")
+    if repo["stargazerCount"]:
+        facts.append(f'{repo["stargazerCount"]:,} star{"s" * (repo["stargazerCount"] != 1)}')
+    x = W - c.text(W, 44, 15, "↗", t["muted"], anchor="end") - 10
+    c.text(x, 44, 13, facts[0], t["muted"], anchor="end")
+    for i, fact in enumerate(facts[1:]):
+        c.text(W, 76 + i * 23, 13, fact, t["muted"], anchor="end")
     return c.render()
 
 
@@ -369,9 +447,15 @@ def link_w(text):
 
 
 def link(text, theme):
-    c = Canvas(44, text, theme, link_w(text))
-    x = c.text(0, 30, 24, text, c.t["ink"], face="italic")
-    c.text(x + 8, 29, 17, "↗", c.t["muted"])
+    c = Canvas(72, text, theme, link_w(text))
+    x = c.text(0, 52, 24, text, c.t["ink"], face="italic")
+    c.text(x + 8, 51, 17, "↗", c.t["muted"])
+    return c.render()
+
+
+def rule(theme):
+    c = Canvas(1, "", theme)
+    c.line(0)
     return c.render()
 
 
@@ -394,20 +478,22 @@ def build(user):
                 f'<img src="assets/{name}-light.svg" width="{width}" alt="{html.escape(alt, quote=True)}"></picture>')
 
     out = ["<!-- Generated by scripts/build.py. Change config.json or the script, not this file. -->", "",
-           picture("header", lambda th: header(d, th), f'{d["name"]}. {d["bio"]}'), ""]
-    if d["stack"]:
-        out += [picture("stack", lambda th: stack(d, th), "Stack: " + ", ".join(d["stack"])), ""]
+           picture("header", lambda th: header(d, th), f'{d["name"]}. {d["bio"]}'), "",
+           picture("activity", lambda th: activity(d, th),
+                   f'{d["contributions"]} contributions in the last year across {d["active_days"]} active days, '
+                   f'longest streak {d["streak"]} days, {d["repo_count"]} public repositories'), ""]
+    if d["language_share"] or d["frameworks"]:
+        alt = ", ".join([f"{n} {p}%" for n, p in d["language_share"]] + d["frameworks"])
+        out += [picture("stack", lambda th: stack(d, th), "Stack: " + alt), ""]
     if d["worlds"]:
         out.append(picture("work", lambda th: heading("Selected work", th), "Selected work"))
-        for repo in d["worlds"]:
+        for i, repo in enumerate(d["worlds"], 1):
             own = repo["owner"]["login"] == d["login"]
             name = f'project-{slug(repo["name"] if own else repo["nameWithOwner"])}'
-            alt = f'{repo["name"].strip("-_")}: {describe(repo, 116)}'
+            alt = f'{repo["name"].strip("-_")}: {describe(repo, 170)}'
             out.append(f'<a href="{html.escape(repo["url"], quote=True)}">'
-                       f'{picture(name, lambda th: project(repo, d, th), alt)}</a>')
-        out.append("")
-    out += [picture("footer", lambda th: footer(d, th),
-                    f'{d["contributions"]} contributions in the last year, {d["repo_count"]} repositories'), ""]
+                       f'{picture(name, lambda th: project(repo, i, d, th), alt)}</a>')
+        out += [picture("rule", rule, ""), ""]
     if d["links"]:
         out.append('<p align="center">')
         for text, url in d["links"]:
@@ -415,7 +501,8 @@ def build(user):
                        f'{picture("link-" + slug(text), lambda th: link(text, th), text, link_w(text))}</a>')
         out += ["</p>", ""]
     (ROOT / "README.md").write_text("\n".join(out), encoding="utf-8", newline="\n")
-    print(f'Built README for {d["login"]}: {len(d["worlds"])} projects, stack: {", ".join(d["stack"])}')
+    print(f'Built README for {d["login"]}: {len(d["worlds"])} projects, {d["contributions"]} contributions, '
+          f'languages {d["language_share"]}, frameworks {d["frameworks"]}')
 
 
 if __name__ == "__main__":
