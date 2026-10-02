@@ -216,7 +216,8 @@ def summarise(user):
         "stack": stack,
         "links": links,
         "contributions": user["contributionsCollection"]["contributionCalendar"]["totalContributions"],
-        "repo_count": user["repositories"]["totalCount"],
+        # the profile repo itself is not a project
+        "repo_count": user["repositories"]["totalCount"] - any(r["name"] == user["login"] for r in user["repositories"]["nodes"]),
         "stars": sum(r["stargazerCount"] for r in own),
         "top_language": languages[0][0] if languages else "",
     }
