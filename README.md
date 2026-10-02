@@ -2,7 +2,7 @@
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="assets/header-dark.svg"><img src="assets/header-light.svg" width="100%" alt="shubh. Developer and designer turning interesting ideas into things you can actually use."></picture>
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="assets/activity-dark.svg"><img src="assets/activity-light.svg" width="100%" alt="202 contributions in the last year across 21 active days, longest streak 12 days, 4 public repositories"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="assets/activity-dark.svg"><img src="assets/activity-light.svg" width="100%" alt="203 contributions in the last year across 21 active days, longest streak 12 days, 4 public repositories"></picture>
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="assets/stack-dark.svg"><img src="assets/stack-light.svg" width="100%" alt="Stack: TypeScript 57%, Python 34%, CSS 5%, HTML 2%, Other 2%, React, Tailwind, Supabase, Next.js, Three.js, Flask, Vitest, FastAPI, Express, Vite, Pandas, NumPy"></picture>
 
